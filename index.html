@@ -647,10 +647,16 @@ async function callJSON(system, messages, maxTokens) {
   return extractJSON(text);
 }
 function promptContext() {
-  return "Learner: Gareth, a native English speaker learning Spanish, level " + S.level + " of " + TOTAL_LEVELS + " (CEFR " + cefrLabel(S.level) +
+  const band = cefrLabel(S.level);
+  const pitch = band === "A1"
+    ? " IMPORTANT: the learner is a true beginner (A1). Use only very high-frequency vocabulary, very short and simple sentences, and mostly present tense. Models always overestimate beginners; when in doubt, make it easier."
+    : band === "A2"
+    ? " Keep the language elementary (A2): short sentences, everyday vocabulary, present and simple past tenses only."
+    : "";
+  return "Learner: Gareth, a native English speaker learning Spanish, level " + S.level + " of " + TOTAL_LEVELS + " (CEFR " + band +
     "). Difficulty preference: " + S.settings.difficulty +
     ". Topics to draw from naturally: " + S.settings.topics +
-    ". Use natural, neutral Latin American Spanish that is widely understood; avoid strongly regional slang. English text uses US spelling. Never use em dashes anywhere.";
+    ". Use natural, neutral Latin American Spanish that is widely understood; avoid strongly regional slang. English text uses US spelling. Never use em dashes anywhere." + pitch;
 }
 function vocabSpec() {
   return S.settings.cardStyle === "phrases"
@@ -1490,14 +1496,19 @@ function speak(text, rate) {
   u.lang = SPEECH_LANG;
   if (noVoice) u.voice = noVoice;
   u.rate = rate || 1;
-  speechSynthesis.speak(u);
-  speechSynthesis.resume(); // Chrome sometimes starts paused and stays silent without this
+  // Small delay: speaking immediately after cancel() is silently dropped in some browsers,
+  // which is why replaying or tapping Slow mid-speech could do nothing.
+  setTimeout(() => {
+    speechSynthesis.speak(u);
+    speechSynthesis.resume(); // Chrome sometimes starts paused and stays silent without this
+  }, 60);
 }
 function speakLong(text, rate) {
   if (!canSpeak()) { toast("This browser has no speech synthesis."); return; }
   ensureVoice();
   speechSynthesis.cancel();
   const parts = text.match(/[^.!?]+[.!?]*/g) || [text];
+  const us = [];
   for (const part of parts) {
     const s = part.trim();
     if (!s) continue;
@@ -1505,9 +1516,12 @@ function speakLong(text, rate) {
     u.lang = SPEECH_LANG;
     if (noVoice) u.voice = noVoice;
     u.rate = rate || 1;
-    speechSynthesis.speak(u);
+    us.push(u);
   }
-  speechSynthesis.resume();
+  setTimeout(() => {
+    for (const u of us) speechSynthesis.speak(u);
+    speechSynthesis.resume();
+  }, 60);
 }
 function lvListenSpec(lv) {
   if (lv === "A1") return "One very simple sentence of 5 to 7 common words.";
