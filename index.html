@@ -854,7 +854,7 @@ async function markTranslation(english, spanish, extraNote) {
     '"errors": [{"issue": "3-6 word label", "explanation": "clear English explanation of the rule and why", "tag": "one of: ' + TAG_LIST + '"}], ' +
     '"native": "what a native speaker would most naturally say", ' +
     '"comment": "one short honest sentence of feedback, not gushing", ' +
-    '"vocab": [{"no": "spanish item", "en": "english"}]} ' +
+    '"vocab": [{"spanish": "spanish item", "en": "english"}]} ' +
     "vocab holds up to 3 items the learner got wrong or was missing, worth drilling (" + vocabSpec() + "); [] if none. " +
     "If the answer is fully correct and natural, errors is [] and score is 95-100. " +
     "At the learner's level, be generous about accents but firm about ser vs estar, gender, and conjugation. Explanations teach; never just restate the fix.";
@@ -895,11 +895,14 @@ function newCard(no, en) {
 function addCards(pairs) {
   let added = 0;
   for (const p of pairs || []) {
-    if (!p || !p.no || !p.en) continue;
-    const key = p.no.trim().toLowerCase();
-    if (!key || !/\p{L}/u.test(p.no) || !/\p{L}/u.test(p.en)) continue; // must contain real letters
+    if (!p) continue;
+    const noSide = String(p.no || p.spanish || p.es || p.text || "").trim();
+    const enSide = String(p.en || p.english || "").trim();
+    if (!noSide || !enSide) continue;
+    if (!/\p{L}/u.test(noSide) || !/\p{L}/u.test(enSide)) continue; // must contain real letters
+    const key = noSide.toLowerCase();
     if (S.deck.some(c => c.no.trim().toLowerCase() === key)) continue;
-    S.deck.push(newCard(p.no, p.en));
+    S.deck.push(newCard(noSide, enSide));
     added++;
   }
   if (added) { save(); renderVocabStats(); }
@@ -1189,7 +1192,7 @@ $("weakPhrase").addEventListener("click", async () => {
     const words = weak.map(c => c.no + " (" + c.en + ")").join(", ");
     const sys = "You build contextual flashcards for a Spanish learner. " + promptContext() +
       " For each given word, write one short natural Spanish phrase of 3 to 6 words that uses the word in a typical context, with its English meaning." +
-      ' Respond with only JSON: {"cards":[{"no":"phrase","en":"english"}]}';
+      ' Respond with only JSON: {"cards":[{"spanish":"phrase","en":"english"}]}';
     const j = await callJSON(sys, [{ role: "user", content: "Words: " + words }], 900);
     const n = addCards(j.cards);
     toast(n ? n + " phrase cards added" : "No new cards (duplicates skipped)");
@@ -1207,7 +1210,7 @@ $("seedBtn").addEventListener("click", async () => {
     const basics = cefrLabel(S.level) === "A1" ? "" : " No absolute beginner words (not hola, gracias, si).";
     const sys = "You build a starter flashcard deck for a Spanish learner. " + promptContext() +
       " Create exactly 30 cards: about 20 high-frequency items slightly above the learner's comfort zone, and about 10 drawn from the learner's topics." + basics + phraseBit +
-      ' Respond with only JSON: {"cards":[{"no":"spanish","en":"english"}]}';
+      ' Respond with only JSON: {"cards":[{"spanish":"...","en":"english"}]}';
     const j = await callJSON(sys, [{ role: "user", content: "Build my starter deck." }], 2500);
     const n = addCards(j.cards);
     toast(n + " cards added");
@@ -1419,15 +1422,17 @@ async function lookupWord(token, span) {
     const context = rdCurrent.passage.slice(Math.max(0, idx - 120), idx + 140);
     const sys = "You are a Spanish-English dictionary that understands context. " +
       "Given a Spanish word and the sentence it appears in, explain it. Use US spelling. Never use em dashes. " +
-      ' Respond with only JSON: {"no":"the dictionary (base) form","en":"meaning in this exact context","note":"very short grammar note, e.g. feminine noun; preterite of hacer; subjunctive"}';
+      ' Respond with only JSON: {"spanish":"the dictionary (base) form","en":"meaning in this exact context","note":"very short grammar note, e.g. feminine noun; preterite of hacer; subjunctive"}';
     const j = await callJSON(sys, [{ role: "user", content: "Word: " + word + "\nContext: ..." + context + "..." }], 300);
-    box.innerHTML = "<b>" + esc(j.no || word) + "</b> = " + esc(j.en || "?") +
+    const base = j.spanish || j.no || word;
+    const meaning = j.en || j.english || "";
+    box.innerHTML = "<b>" + esc(base) + "</b> = " + esc(meaning || "?") +
       (j.note ? '<br><span style="font-size:.82rem">' + esc(j.note) + "</span>" : "");
     const add = document.createElement("button");
     add.className = "addbtn";
     add.textContent = "Add to deck";
     add.addEventListener("click", () => {
-      const n = addCards([{ no: j.no || word, en: j.en || "" }]);
+      const n = addCards([{ no: base, en: meaning }]);
       toast(n ? "Added to deck" : "Already in your deck");
     });
     box.appendChild(document.createElement("br"));
@@ -1520,10 +1525,11 @@ async function liNewSentence() {
     noteTheme(theme);
     const sys = "You write Spanish for a listening dictation exercise. " + promptContext() +
       " Theme: " + theme + ". " + lvListenSpec(cefrLabel(S.level)) + " Natural spoken Spanish, specific rather than generic." +
-      ' Respond with only JSON: {"norwegian":"the spanish text","english":"english meaning"}';
+      ' Respond with only JSON: {"spanish":"the spanish text","english":"english meaning"}';
     const j = await callJSON(sys, [{ role: "user", content: "One new dictation item." }], 500);
-    if (!j.norwegian) throw new Error("No sentence returned. Try again.");
-    liCurrent = j;
+    const esText = j.spanish || j.norwegian || j.text;
+    if (!esText) throw new Error("No sentence returned. Try again.");
+    liCurrent = { norwegian: esText, english: j.english || "" };
     $("liInput").value = "";
     $("liResult").classList.remove("show");
     $("liPlay").disabled = false;
@@ -1545,7 +1551,7 @@ async function liCheckAnswer() {
       ' Respond with only JSON: {"score":0-100,' +
       '"errors":[{"issue":"3-6 word label","explanation":"what was missed or misheard and why it matters, in English","tag":"one of: ' + TAG_LIST + '"}],' +
       '"comment":"one short honest sentence",' +
-      '"vocab":[{"no":"...","en":"..."}]} ' +
+      '"vocab":[{"spanish":"...","en":"..."}]} ' +
       "vocab holds up to 3 missed items worth drilling (" + vocabSpec() + "); [] if none.";
     const j = await callJSON(sys, [{ role: "user", content: "Actual text: " + liCurrent.norwegian + "\nLearner typed: " + ans }], 1000);
     renderMarking($("liResult"), j);
@@ -1680,8 +1686,9 @@ async function genListenItem(lv, goalText) {
   const sys = "You write Spanish for a listening dictation test item at CEFR level " + lv + ". " + promptContext() +
     " " + lvListenSpec(lv) +
     (goalText ? " The item should exercise this curriculum goal: " + goalText + "." : "") +
-    ' Respond with only JSON: {"norwegian":"the spanish text"}';
-  return callJSON(sys, [{ role: "user", content: "One dictation item." }], 400);
+    ' Respond with only JSON: {"spanish":"the spanish text"}';
+  const j = await callJSON(sys, [{ role: "user", content: "One dictation item." }], 400);
+  return { norwegian: j.spanish || j.norwegian || j.text || "" };
 }
 async function genReadItem(lv, goalText) {
   const sys = "You write a Spanish reading test item at CEFR level " + lv + ". " + promptContext() +
